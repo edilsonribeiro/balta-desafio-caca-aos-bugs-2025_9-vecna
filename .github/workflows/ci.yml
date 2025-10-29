@@ -1,70 +1,70 @@
-name: CI/CD
+# name: CI/CD
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
+# on:
+#   push:
+#     branches:
+#       - main
+#   pull_request:
+#     branches:
+#       - main
+#   workflow_dispatch:
 
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
+# jobs:
+#   build-and-test:
+#     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
+#       - name: Setup .NET
+#         uses: actions/setup-dotnet@v4
+#         with:
+#           dotnet-version: 9.0.x
 
-      - name: Restore dependencies
-        run: dotnet restore src/BugStore.sln
+#       - name: Restore dependencies
+#         run: dotnet restore src/BugStore.sln
 
-      - name: Build
-        run: dotnet build src/BugStore.sln --configuration Release --no-restore
+#       - name: Build
+#         run: dotnet build src/BugStore.sln --configuration Release --no-restore
 
-      - name: Test
-        run: dotnet test src/BugStore.sln --configuration Release --no-build
+#       - name: Test
+#         run: dotnet test src/BugStore.sln --configuration Release --no-build
 
-      - name: Publish artifacts
-        run: dotnet publish src/BugStore.sln --configuration Release --output publish && cd publish && zip -r ../published-app.zip .
+#       - name: Publish artifacts
+#         run: dotnet publish src/BugStore.sln --configuration Release --output publish && cd publish && zip -r ../published-app.zip .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: published-app
-          path: published-app.zip
+#       - name: Upload artifact
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: published-app
+#           path: published-app.zip
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+#   deploy:
+#     runs-on: ubuntu-latest
+#     needs: build-and-test
+#     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    permissions:
-      id-token: write
-      contents: read
+#     permissions:
+#       id-token: write
+#       contents: read
 
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: published-app
+#     steps:
+#       - name: Download artifact
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: published-app
 
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8B80B59CCB1941CEAF586B2B5723CDBB }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_08AFE4379FC442B9A0D45DBA8F49FD2F }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_23A192783A2540D49B94E26F60D6C0B1 }}
+#       - name: Azure login
+#         uses: azure/login@v2
+#         with:
+#           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8B80B59CCB1941CEAF586B2B5723CDBB }}
+#           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_08AFE4379FC442B9A0D45DBA8F49FD2F }}
+#           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_23A192783A2540D49B94E26F60D6C0B1 }}
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: bug-store
-          slot-name: Production
-          package: published-app.zip
+#       - name: Deploy to Azure Web App
+#         uses: azure/webapps-deploy@v3
+#         with:
+#           app-name: bug-store
+#           slot-name: Production
+#           package: published-app.zip
