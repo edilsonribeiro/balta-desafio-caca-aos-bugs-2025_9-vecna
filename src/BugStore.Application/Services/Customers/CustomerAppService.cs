@@ -1,12 +1,11 @@
 using BugStore.Application.Contracts.Customers;
 using BugStore.Application.Handlers.Customers.Commands;
 using BugStore.Application.Handlers.Customers.Queries;
+using BugStore.Application.Queries.Customers.Models;
 using BugStore.Application.Responses.Common;
 using MediatR;
 using CreateCustomerRequest = BugStore.Application.Requests.Customers.Create;
 using CreateCustomerResponse = BugStore.Application.Responses.Customers.Create;
-using GetCustomerByIdResponse = BugStore.Application.Responses.Customers.GetById;
-using GetCustomersResponse = BugStore.Application.Responses.Customers.Get;
 using UpdateCustomerRequest = BugStore.Application.Requests.Customers.Update;
 using UpdateCustomerResponse = BugStore.Application.Responses.Customers.Update;
 
@@ -14,7 +13,7 @@ namespace BugStore.Application.Services.Customers;
 
 public class CustomerAppService(IMediator mediator) : ICustomerAppService
 {
-    public Task<PagedResult<GetCustomersResponse>> SearchAsync(
+    public Task<PagedResult<CustomerListItem>> SearchAsync(
         string? term,
         int page,
         int pageSize,
@@ -26,7 +25,7 @@ public class CustomerAppService(IMediator mediator) : ICustomerAppService
         return mediator.Send(query, cancellationToken);
     }
 
-    public Task<GetCustomerByIdResponse?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task<CustomerDetails?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var query = new GetCustomerByIdQuery(id);
         return mediator.Send(query, cancellationToken);

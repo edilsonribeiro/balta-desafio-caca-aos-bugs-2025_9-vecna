@@ -1,7 +1,7 @@
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using BugStore.Application.Queries.Customers.Models;
 using BugStore.Application.Responses.Common;
-using BugStore.Application.Responses.Customers;
 using BugStore.Domain.Entities;
 using BugStore.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -10,8 +10,8 @@ using MediatR;
 namespace BugStore.Application.Handlers.Customers.Queries;
 
 public class CustomerQueryHandler :
-    IRequestHandler<SearchCustomersQuery, PagedResult<Get>>,
-    IRequestHandler<GetCustomerByIdQuery, GetById?>
+    IRequestHandler<SearchCustomersQuery, PagedResult<CustomerListItem>>,
+    IRequestHandler<GetCustomerByIdQuery, CustomerDetails?>
 {
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
@@ -25,7 +25,7 @@ public class CustomerQueryHandler :
         _mapper = mapper;
     }
 
-    public async Task<PagedResult<Get>> Handle(SearchCustomersQuery request, CancellationToken cancellationToken)
+    public async Task<PagedResult<CustomerListItem>> Handle(SearchCustomersQuery request, CancellationToken cancellationToken)
     {
         var (page, pageSize) = NormalizePagination(request.Page, request.PageSize);
 
@@ -50,20 +50,20 @@ public class CustomerQueryHandler :
         var customers = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ProjectTo<Get>(_mapper.ConfigurationProvider)
+            .ProjectTo<CustomerListItem>(_mapper.ConfigurationProvider)
             .ToListAsync(cancellationToken);
 
-        return new PagedResult<Get>(customers, total, page, pageSize);
+        return new PagedResult<CustomerListItem>(customers, total, page, pageSize);
     }
 
-    public async Task<GetById?> Handle(GetCustomerByIdQuery request, CancellationToken cancellationToken)
+    public async Task<CustomerDetails?> Handle(GetCustomerByIdQuery request, CancellationToken cancellationToken)
     {
         var customer = await _customerRepository
             .Query()
             .AsNoTracking()
             .FirstOrDefaultAsync(entity => entity.Id == request.Id, cancellationToken);
 
-        return _mapper.Map<GetById?>(customer);
+        return _mapper.Map<CustomerDetails?>(customer);
     }
 
     private static string EscapeLikePattern(string value) =>
