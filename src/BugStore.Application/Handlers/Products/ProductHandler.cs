@@ -9,15 +9,51 @@ using CreateProductResponse = BugStore.Application.Responses.Products.Create;
 using GetProductByIdResponse = BugStore.Application.Responses.Products.GetById;
 using GetProductsResponse = BugStore.Application.Responses.Products.Get;
 using UpdateProductResponse = BugStore.Application.Responses.Products.Update;
+using MediatR;
 
 namespace BugStore.Application.Handlers.Products;
 
-public class ProductHandler(AppDbContext context)
+public record SearchProductsQuery(
+    string? Term,
+    int Page = 1,
+    int PageSize = 25,
+    string? SortBy = null,
+    string? SortOrder = null) : IRequest<PagedResult<GetProductsResponse>>;
+
+public record GetProductByIdQuery(Guid Id) : IRequest<GetProductByIdResponse?>;
+
+public record CreateProductCommand(CreateProductRequest Request) : IRequest<CreateProductResponse>;
+
+public record UpdateProductCommand(Guid Id, UpdateProductRequest Request) : IRequest<UpdateProductResponse?>;
+
+public record DeleteProductCommand(Guid Id) : IRequest<bool>;
+
+public class ProductHandler(AppDbContext context) :
+    IRequestHandler<SearchProductsQuery, PagedResult<GetProductsResponse>>,
+    IRequestHandler<GetProductByIdQuery, GetProductByIdResponse?>,
+    IRequestHandler<CreateProductCommand, CreateProductResponse>,
+    IRequestHandler<UpdateProductCommand, UpdateProductResponse?>,
+    IRequestHandler<DeleteProductCommand, bool>
 {
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
 
     private readonly AppDbContext _context = context;
+
+    public Task<PagedResult<GetProductsResponse>> Handle(SearchProductsQuery request, CancellationToken cancellationToken) =>
+        SearchAsync(request.Term, request.Page, request.PageSize, request.SortBy, request.SortOrder, cancellationToken);
+
+    public Task<GetProductByIdResponse?> Handle(GetProductByIdQuery request, CancellationToken cancellationToken) =>
+        GetByIdAsync(request.Id, cancellationToken);
+
+    public Task<CreateProductResponse> Handle(CreateProductCommand request, CancellationToken cancellationToken) =>
+        CreateAsync(request.Request, cancellationToken);
+
+    public Task<UpdateProductResponse?> Handle(UpdateProductCommand request, CancellationToken cancellationToken) =>
+        UpdateAsync(request.Id, request.Request, cancellationToken);
+
+    public Task<bool> Handle(DeleteProductCommand request, CancellationToken cancellationToken) =>
+        DeleteAsync(request.Id, cancellationToken);
 
     public async Task<IReadOnlyList<GetProductsResponse>> GetAsync(CancellationToken cancellationToken = default)
     {

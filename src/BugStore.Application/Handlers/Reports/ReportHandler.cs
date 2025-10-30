@@ -1,11 +1,30 @@
 using BugStore.Application.Responses.Reports;
 using BugStore.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using MediatR;
 
 namespace BugStore.Application.Handlers.Reports;
 
-public class ReportHandler(AppDbContext context)
+public record GetSalesByCustomerQuery(
+    Guid CustomerId,
+    DateTime? StartDate,
+    DateTime? EndDate) : IRequest<SalesByCustomerResponse?>;
+
+public record GetRevenueByPeriodQuery(
+    DateTime? StartDate,
+    DateTime? EndDate,
+    RevenuePeriod Period = RevenuePeriod.Day) : IRequest<IReadOnlyList<RevenueByPeriodResponse>>;
+
+public class ReportHandler(AppDbContext context) :
+    IRequestHandler<GetSalesByCustomerQuery, SalesByCustomerResponse?>,
+    IRequestHandler<GetRevenueByPeriodQuery, IReadOnlyList<RevenueByPeriodResponse>>
 {
+    public Task<SalesByCustomerResponse?> Handle(GetSalesByCustomerQuery request, CancellationToken cancellationToken) =>
+        GetSalesByCustomerAsync(request.CustomerId, request.StartDate, request.EndDate, cancellationToken);
+
+    public Task<IReadOnlyList<RevenueByPeriodResponse>> Handle(GetRevenueByPeriodQuery request, CancellationToken cancellationToken) =>
+        GetRevenueByPeriodAsync(request.StartDate, request.EndDate, request.Period, cancellationToken);
+
     public async Task<SalesByCustomerResponse?> GetSalesByCustomerAsync(
         Guid customerId,
         DateTime? startDate,

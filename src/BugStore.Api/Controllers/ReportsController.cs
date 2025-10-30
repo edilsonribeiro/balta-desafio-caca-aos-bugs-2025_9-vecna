@@ -2,12 +2,13 @@ using BugStore.Api.Controllers.Models;
 using BugStore.Application.Handlers.Reports;
 using BugStore.Application.Responses.Reports;
 using Microsoft.AspNetCore.Mvc;
+using MediatR;
 
 namespace BugStore.Api.Controllers;
 
 [ApiController]
 [Route("v1/reports")]
-public class ReportsController(ReportHandler handler) : ControllerBase
+public class ReportsController(IMediator mediator) : ControllerBase
 {
     [HttpGet("sales-by-customer/{customerId:guid}")]
     public async Task<IActionResult> GetSalesByCustomerAsync(Guid customerId, [FromQuery] ReportQuery query, CancellationToken cancellationToken)
@@ -15,7 +16,9 @@ public class ReportsController(ReportHandler handler) : ControllerBase
         if (query.StartDate.HasValue && query.EndDate.HasValue && query.StartDate > query.EndDate)
             return BadRequest("O parâmetro startDate não pode ser maior que endDate.");
 
-        var result = await handler.GetSalesByCustomerAsync(customerId, query.StartDate, query.EndDate, cancellationToken);
+        var result = await mediator.Send(
+            new GetSalesByCustomerQuery(customerId, query.StartDate, query.EndDate),
+            cancellationToken);
         return result is null ? NotFound() : Ok(result);
     }
 
@@ -29,7 +32,9 @@ public class ReportsController(ReportHandler handler) : ControllerBase
         if (!isValid)
             return BadRequest("Valor inválido para groupBy. Utilize day, month ou year.");
 
-        var result = await handler.GetRevenueByPeriodAsync(query.StartDate, query.EndDate, period, cancellationToken);
+        var result = await mediator.Send(
+            new GetRevenueByPeriodQuery(query.StartDate, query.EndDate, period),
+            cancellationToken);
         return Ok(result);
     }
 

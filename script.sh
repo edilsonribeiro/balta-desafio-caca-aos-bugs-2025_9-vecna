@@ -392,10 +392,10 @@ call_api GET "/v1/orders?page=1&pageSize=5&sortBy=createdAt&sortOrder=desc"
 printf 'Total pedidos: %s\n' "$(printf '%s' "$LAST_BODY" | jq '.total')"
 
 log "Relatório de vendas por cliente"
-call_api GET "/v1/reports/sales-by-customer"
+call_api GET "/v1/reports/sales-by-customer/${CUSTOMER_ID}"
 
 log "Relatório de vendas por cliente (período completo)"
-call_api GET "/v1/reports/sales-by-customer?startDate=2020-01-01T00:00:00Z&endDate=2100-01-01T00:00:00Z"
+call_api GET "/v1/reports/sales-by-customer/${CUSTOMER_ID}?startDate=2020-01-01T00:00:00Z&endDate=2100-01-01T00:00:00Z"
 
 log "Relatório de faturamento diário"
 call_api GET "/v1/reports/revenue-by-period?groupBy=day"

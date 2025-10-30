@@ -9,10 +9,31 @@ using CreateCustomerResponse = BugStore.Application.Responses.Customers.Create;
 using GetCustomerByIdResponse = BugStore.Application.Responses.Customers.GetById;
 using GetCustomersResponse = BugStore.Application.Responses.Customers.Get;
 using UpdateCustomerResponse = BugStore.Application.Responses.Customers.Update;
+using MediatR;
 
 namespace BugStore.Application.Handlers.Customers;
 
-public class CustomerHandler
+public record SearchCustomersQuery(
+    string? Term,
+    int Page = 1,
+    int PageSize = 25,
+    string? SortBy = null,
+    string? SortOrder = null) : IRequest<PagedResult<GetCustomersResponse>>;
+
+public record GetCustomerByIdQuery(Guid Id) : IRequest<GetCustomerByIdResponse?>;
+
+public record CreateCustomerCommand(CreateCustomerRequest Request) : IRequest<CreateCustomerResponse>;
+
+public record UpdateCustomerCommand(Guid Id, UpdateCustomerRequest Request) : IRequest<UpdateCustomerResponse?>;
+
+public record DeleteCustomerCommand(Guid Id) : IRequest<bool>;
+
+public class CustomerHandler :
+    IRequestHandler<SearchCustomersQuery, PagedResult<GetCustomersResponse>>,
+    IRequestHandler<GetCustomerByIdQuery, GetCustomerByIdResponse?>,
+    IRequestHandler<CreateCustomerCommand, CreateCustomerResponse>,
+    IRequestHandler<UpdateCustomerCommand, UpdateCustomerResponse?>,
+    IRequestHandler<DeleteCustomerCommand, bool>
 {
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
@@ -23,6 +44,21 @@ public class CustomerHandler
     {
         _context = context;
     }
+
+    public Task<PagedResult<GetCustomersResponse>> Handle(SearchCustomersQuery request, CancellationToken cancellationToken) =>
+        SearchAsync(request.Term, request.Page, request.PageSize, request.SortBy, request.SortOrder, cancellationToken);
+
+    public Task<GetCustomerByIdResponse?> Handle(GetCustomerByIdQuery request, CancellationToken cancellationToken) =>
+        GetByIdAsync(request.Id, cancellationToken);
+
+    public Task<CreateCustomerResponse> Handle(CreateCustomerCommand request, CancellationToken cancellationToken) =>
+        CreateAsync(request.Request, cancellationToken);
+
+    public Task<UpdateCustomerResponse?> Handle(UpdateCustomerCommand request, CancellationToken cancellationToken) =>
+        UpdateAsync(request.Id, request.Request, cancellationToken);
+
+    public Task<bool> Handle(DeleteCustomerCommand request, CancellationToken cancellationToken) =>
+        DeleteAsync(request.Id, cancellationToken);
 
     public async Task<IReadOnlyList<GetCustomersResponse>> GetAsync(CancellationToken cancellationToken = default)
     {

@@ -8,13 +8,37 @@ using CreateOrderResponse = BugStore.Application.Responses.Orders.Create;
 using GetOrderByIdResponse = BugStore.Application.Responses.Orders.GetById;
 using OrderLineResponse = BugStore.Application.Responses.Orders.Line;
 using SearchOrderResponse = BugStore.Application.Responses.Orders.Search;
+using MediatR;
 
 namespace BugStore.Application.Handlers.Orders;
 
-public class OrderHandler(AppDbContext context)
+public record SearchOrdersQuery(
+    string? Term,
+    int Page = 1,
+    int PageSize = 25,
+    string? SortBy = null,
+    string? SortOrder = null) : IRequest<PagedResult<SearchOrderResponse>>;
+
+public record GetOrderByIdQuery(Guid Id) : IRequest<GetOrderByIdResponse?>;
+
+public record CreateOrderCommand(CreateOrderRequest Request) : IRequest<CreateOrderResponse?>;
+
+public class OrderHandler(AppDbContext context) :
+    IRequestHandler<SearchOrdersQuery, PagedResult<SearchOrderResponse>>,
+    IRequestHandler<GetOrderByIdQuery, GetOrderByIdResponse?>,
+    IRequestHandler<CreateOrderCommand, CreateOrderResponse?>
 {
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
+
+    public Task<PagedResult<SearchOrderResponse>> Handle(SearchOrdersQuery request, CancellationToken cancellationToken) =>
+        SearchAsync(request.Term, request.Page, request.PageSize, request.SortBy, request.SortOrder, cancellationToken);
+
+    public Task<GetOrderByIdResponse?> Handle(GetOrderByIdQuery request, CancellationToken cancellationToken) =>
+        GetByIdAsync(request.Id, cancellationToken);
+
+    public Task<CreateOrderResponse?> Handle(CreateOrderCommand request, CancellationToken cancellationToken) =>
+        CreateAsync(request.Request, cancellationToken);
 
     public async Task<GetOrderByIdResponse?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {

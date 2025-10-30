@@ -1,8 +1,5 @@
 
 using BugStore.Application.Handlers.Customers;
-using BugStore.Application.Handlers.Orders;
-using BugStore.Application.Handlers.Products;
-using BugStore.Application.Handlers.Reports;
 using BugStore.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
@@ -14,10 +11,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
-builder.Services.AddScoped<CustomerHandler>();
-builder.Services.AddScoped<ProductHandler>();
-builder.Services.AddScoped<OrderHandler>();
-builder.Services.AddScoped<ReportHandler>();
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CustomerHandler>());
 
 var app = builder.Build();
 
