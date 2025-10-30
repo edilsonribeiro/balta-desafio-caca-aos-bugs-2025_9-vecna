@@ -41,7 +41,7 @@ public class ReportHandler(AppDbContext context) :
         var (normalizedStart, normalizedEnd) = NormalizeDateRange(startDate, endDate);
 
         var ordersQuery = context.Orders
-            .AsNoTracking()
+            .AsNoTrackingWithIdentityResolution()
             .Include(order => order.Lines)
                 .ThenInclude(line => line.Product)
             .Where(order => order.CustomerId == customerId);
