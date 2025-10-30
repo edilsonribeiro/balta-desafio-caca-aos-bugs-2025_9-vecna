@@ -7,12 +7,17 @@ using BugStore.Domain.Repositories;
 using BugStore.Infrastructure.Data;
 using BugStore.Infrastructure.Repositories.Customers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContextPool<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=app.db"));
+{
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=app.db");
+    options.EnableSensitiveDataLogging(builder.Environment.IsDevelopment());
+    options.EnableDetailedErrors(builder.Environment.IsDevelopment());
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
@@ -23,6 +28,11 @@ builder.Services.AddSingleton<ICustomerCacheSignal, CustomerCacheSignal>();
 builder.Services.AddScoped<ICustomerAppService, CustomerAppService>();
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+if (builder.Environment.IsProduction())
+{
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+}
 
 var app = builder.Build();
 
