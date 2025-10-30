@@ -14,8 +14,8 @@ Neste processo eu aprendi:
 * ✅ Performance
 
 ## REGRAS DO DESAFIO
-- [ ] Realizar um fork do repositório do desafio
-- [ ] [Fazer o download do banco de testes](https://baltaio.blob.core.windows.net/temp/desafio-caca-aos-bugs-2025/database.zip)
+- [x] Realizar um fork do repositório do desafio
+- [x] [Fazer o download do banco de testes](https://baltaio.blob.core.windows.net/temp/desafio-caca-aos-bugs-2025/database.zip)
 - [ ] Otimizar os métodos (Principalmente os de leitura)
 - [ ] Obter uma resposta de leitura em menos de 200ms
 

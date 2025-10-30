@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${1:-https://bug-store-h2f9degcamh8ggcd.brazilsouth-01.azurewebsites.net}"
+BASE_URL="${1:-http://localhost:5169}"
+LOAD_TEST_ITERATIONS="${LOAD_TEST_ITERATIONS:-100}"
+STRESS_SEARCH_ITERATIONS="${STRESS_SEARCH_ITERATIONS:-25}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "Este script depende de 'jq'. Instale-o e execute novamente." >&2
@@ -29,44 +31,79 @@ print_body() {
   fi
 }
 
+urlencode() {
+  local raw="$1"
+  jq -rn --arg v "$raw" '$v|@uri'
+}
+
 LAST_BODY=""
 LAST_STATUS=""
+REQUEST_STATUS=""
+REQUEST_BODY=""
+REQUEST_TOTAL_TIME=""
+REQUEST_START_TRANSFER=""
+REQUEST_READ_TIME=""
+REQUEST_SIZE=""
+
+perform_request() {
+  local method="$1"
+  local path="$2"
+  local payload="${3:-}"
+  local curl_format=$'\n%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}'
+  local curl_args=(
+    -sS
+    -X "$method" "${BASE_URL}${path}"
+    -w "$curl_format"
+  )
+
+  if [[ -n "$payload" ]]; then
+    curl_args+=(-H "Content-Type: application/json" -d "$payload")
+  fi
+
+  local response
+  if ! response=$(curl "${curl_args[@]}"); then
+    echo "Falha ao executar ${method} ${path}." >&2
+    return 1
+  fi
+
+  local metadata="${response##*$'\n'}"
+  local body="${response%$'\n'*}"
+  if [[ "$body" == "$metadata" ]]; then
+    body=""
+  fi
+
+  IFS='|' read -r REQUEST_STATUS REQUEST_TOTAL_TIME REQUEST_START_TRANSFER REQUEST_SIZE <<<"$metadata"
+  REQUEST_BODY="$body"
+
+  if [[ -n "$REQUEST_TOTAL_TIME" && -n "$REQUEST_START_TRANSFER" ]]; then
+    REQUEST_READ_TIME=$(awk -v total="$REQUEST_TOTAL_TIME" -v start="$REQUEST_START_TRANSFER" 'BEGIN { printf "%.4f", total - start }')
+  else
+    REQUEST_READ_TIME=""
+  fi
+
+  return 0
+}
 
 call_api() {
   local method="$1"
   local path="$2"
   local payload="${3:-}"
 
-  local response
-  if [[ -n "$payload" ]]; then
-    if ! response=$(curl -sS -X "$method" "${BASE_URL}${path}" \
-      -H "Content-Type: application/json" \
-      -d "$payload" \
-      -w '\n%{http_code}'); then
-      echo "Falha ao executar ${method} ${path}." >&2
-      exit 1
-    fi
-  else
-    if ! response=$(curl -sS -X "$method" "${BASE_URL}${path}" -w '\n%{http_code}'); then
-      echo "Falha ao executar ${method} ${path}." >&2
-      exit 1
-    fi
+  if ! perform_request "$method" "$path" "$payload"; then
+    exit 1
   fi
 
-  local status="${response##*$'\n'}"
-  local body="${response%$'\n'*}"
-  if [[ "$body" == "$status" ]]; then
-    body=""
+  LAST_STATUS="$REQUEST_STATUS"
+  LAST_BODY="$REQUEST_BODY"
+
+  echo "Status: $REQUEST_STATUS"
+  print_body "$LAST_BODY"
+  if [[ -n "$REQUEST_TOTAL_TIME" ]]; then
+    printf 'Tempo total: %.4fs (leitura: %.4fs, corpo: %s bytes)\n' "$REQUEST_TOTAL_TIME" "${REQUEST_READ_TIME:-0}" "${REQUEST_SIZE:-0}"
   fi
 
-  LAST_STATUS="$status"
-  LAST_BODY="$body"
-
-  echo "Status: $status"
-  print_body "$body"
-
-  if [[ "$status" =~ ^[0-9]+$ ]] && (( status >= 400 )); then
-    echo "Requisição ${method} ${path} falhou (status ${status})." >&2
+  if [[ "$REQUEST_STATUS" =~ ^[0-9]+$ ]] && (( REQUEST_STATUS >= 400 )); then
+    echo "Requisição ${method} ${path} falhou (status ${REQUEST_STATUS})." >&2
     exit 1
   fi
 }
@@ -74,30 +111,26 @@ call_api() {
 delete_product() {
   local path="$1"
 
-  if ! response=$(curl -sS -X DELETE "${BASE_URL}${path}" -w '\n%{http_code}'); then
-    echo "Falha ao executar DELETE ${path}." >&2
+  if ! perform_request DELETE "$path"; then
     exit 1
   fi
 
-  local status="${response##*$'\n'}"
-  local body="${response%$'\n'*}"
-  if [[ "$body" == "$status" ]]; then
-    body=""
+  LAST_STATUS="$REQUEST_STATUS"
+  LAST_BODY="$REQUEST_BODY"
+
+  echo "Status: $REQUEST_STATUS"
+  print_body "$LAST_BODY"
+  if [[ -n "$REQUEST_TOTAL_TIME" ]]; then
+    printf 'Tempo total: %.4fs (leitura: %.4fs, corpo: %s bytes)\n' "$REQUEST_TOTAL_TIME" "${REQUEST_READ_TIME:-0}" "${REQUEST_SIZE:-0}"
   fi
 
-  LAST_STATUS="$status"
-  LAST_BODY="$body"
-
-  echo "Status: $status"
-  print_body "$body"
-
-  if [[ "$status" == "409" ]]; then
+  if [[ "$REQUEST_STATUS" == "409" ]]; then
     echo "Produto associado a pedidos. Mantendo registro para preservar o histórico."
     return 0
   fi
 
-  if [[ "$status" =~ ^[0-9]+$ ]] && (( status >= 400 )); then
-    echo "Requisição DELETE ${path} falhou (status ${status})." >&2
+  if [[ "$REQUEST_STATUS" =~ ^[0-9]+$ ]] && (( REQUEST_STATUS >= 400 )); then
+    echo "Requisição DELETE ${path} falhou (status ${REQUEST_STATUS})." >&2
     exit 1
   fi
 }
@@ -114,6 +147,120 @@ extract_from_last() {
   fi
 
   printf '%s' "$value"
+}
+
+load_test() {
+  local method="$1"
+  local path="$2"
+  local iterations="${3:-100}"
+  local payload="${4:-}"
+
+  log "Teste de carga ${method} ${path} (${iterations} execuções)"
+
+  local sum_total="0"
+  local sum_read="0"
+  local min_total=""
+  local max_total=""
+  local min_read=""
+  local max_read=""
+
+  for ((i = 1; i <= iterations; i++)); do
+    if ! perform_request "$method" "$path" "$payload"; then
+      echo "Falha na iteração ${i}." >&2
+      exit 1
+    fi
+
+    if [[ "$REQUEST_STATUS" =~ ^[0-9]+$ ]] && (( REQUEST_STATUS >= 400 )); then
+      echo "Iteração ${i} retornou status ${REQUEST_STATUS}. Interrompendo teste de carga." >&2
+      exit 1
+    fi
+
+    if [[ -z "$REQUEST_TOTAL_TIME" || -z "$REQUEST_READ_TIME" ]]; then
+      echo "Curl não reportou métricas na iteração ${i}." >&2
+      exit 1
+    fi
+
+    sum_total=$(awk -v sum="$sum_total" -v val="$REQUEST_TOTAL_TIME" 'BEGIN { printf "%.6f", sum + val }')
+    sum_read=$(awk -v sum="$sum_read" -v val="$REQUEST_READ_TIME" 'BEGIN { printf "%.6f", sum + val }')
+
+    if [[ -z "$min_total" ]]; then
+      min_total="$REQUEST_TOTAL_TIME"
+      max_total="$REQUEST_TOTAL_TIME"
+      min_read="$REQUEST_READ_TIME"
+      max_read="$REQUEST_READ_TIME"
+    else
+      min_total=$(awk -v current="$REQUEST_TOTAL_TIME" -v existing="$min_total" 'BEGIN { if (current < existing) printf "%.6f", current; else printf "%.6f", existing }')
+      max_total=$(awk -v current="$REQUEST_TOTAL_TIME" -v existing="$max_total" 'BEGIN { if (current > existing) printf "%.6f", current; else printf "%.6f", existing }')
+      min_read=$(awk -v current="$REQUEST_READ_TIME" -v existing="$min_read" 'BEGIN { if (current < existing) printf "%.6f", current; else printf "%.6f", existing }')
+      max_read=$(awk -v current="$REQUEST_READ_TIME" -v existing="$max_read" 'BEGIN { if (current > existing) printf "%.6f", current; else printf "%.6f", existing }')
+    fi
+  done
+
+  local avg_total
+  local avg_read
+  avg_total=$(awk -v sum="$sum_total" -v count="$iterations" 'BEGIN { printf "%.4f", sum / count }')
+  avg_read=$(awk -v sum="$sum_read" -v count="$iterations" 'BEGIN { printf "%.4f", sum / count }')
+
+  printf 'Tempo total médio: %.4fs | min: %.4fs | max: %.4fs\n' "$avg_total" "$min_total" "$max_total"
+  printf 'Tempo leitura médio: %.4fs | min: %.4fs | max: %.4fs\n' "$avg_read" "$min_read" "$max_read"
+}
+
+run_heavy_searches() {
+  if (( STRESS_SEARCH_ITERATIONS <= 0 )); then
+    return
+  fi
+
+  local iterations="$STRESS_SEARCH_ITERATIONS"
+  local -a heavy_pages=(1 5 10 25 50)
+
+  local -a customer_terms=("bruce" "Cliente" "50% off")
+  local -a product_terms=("gadget" "Batarang" "Smoke Pellet")
+  local -a order_terms=("bruce" "batarang" "smoke")
+
+  log "Buscas pesadas - clientes"
+  for term in "${customer_terms[@]}"; do
+    local encoded_term
+    encoded_term=$(urlencode "$term")
+    load_test GET "/v1/customers?term=${encoded_term}&page=1&pageSize=100&sortBy=name&sortOrder=desc" "$iterations"
+    load_test GET "/v1/customers?term=${encoded_term}&page=1&pageSize=100&sortBy=email&sortOrder=asc" "$iterations"
+  done
+
+  local encoded_heavy_customer_term
+  encoded_heavy_customer_term=$(urlencode "${customer_terms[0]}")
+  for page in "${heavy_pages[@]}"; do
+    load_test GET "/v1/customers?page=${page}&pageSize=100&sortBy=name&sortOrder=desc" "$iterations"
+    load_test GET "/v1/customers?term=${encoded_heavy_customer_term}&page=${page}&pageSize=100&sortBy=birthDate&sortOrder=desc" "$iterations"
+  done
+
+  log "Buscas pesadas - produtos"
+  for term in "${product_terms[@]}"; do
+    local encoded_term
+    encoded_term=$(urlencode "$term")
+    load_test GET "/v1/products?term=${encoded_term}&page=1&pageSize=100&sortBy=price&sortOrder=desc" "$iterations"
+    load_test GET "/v1/products?term=${encoded_term}&page=1&pageSize=100&sortBy=slug&sortOrder=asc" "$iterations"
+  done
+
+  local encoded_heavy_product_term
+  encoded_heavy_product_term=$(urlencode "${product_terms[0]}")
+  for page in "${heavy_pages[@]}"; do
+    load_test GET "/v1/products?page=${page}&pageSize=100&sortBy=price&sortOrder=desc" "$iterations"
+    load_test GET "/v1/products?term=${encoded_heavy_product_term}&page=${page}&pageSize=100&sortBy=title&sortOrder=desc" "$iterations"
+  done
+
+  log "Buscas pesadas - pedidos"
+  for term in "${order_terms[@]}"; do
+    local encoded_term
+    encoded_term=$(urlencode "$term")
+    load_test GET "/v1/orders?term=${encoded_term}&page=1&pageSize=100&sortBy=total&sortOrder=desc" "$iterations"
+    load_test GET "/v1/orders?term=${encoded_term}&page=1&pageSize=100&sortBy=updatedAt&sortOrder=desc" "$iterations"
+  done
+
+  local encoded_heavy_order_term
+  encoded_heavy_order_term=$(urlencode "${order_terms[0]}")
+  for page in "${heavy_pages[@]}"; do
+    load_test GET "/v1/orders?page=${page}&pageSize=100&sortBy=total&sortOrder=desc" "$iterations"
+    load_test GET "/v1/orders?term=${encoded_heavy_order_term}&page=${page}&pageSize=100&sortBy=createdAt&sortOrder=asc" "$iterations"
+  done
 }
 
 log "Ping raiz"
@@ -258,6 +405,14 @@ call_api GET "/v1/reports/revenue-by-period?groupBy=month&startDate=2020-01-01T0
 
 log "Relatório de faturamento anual"
 call_api GET "/v1/reports/revenue-by-period?groupBy=year"
+
+if (( LOAD_TEST_ITERATIONS > 0 )); then
+  load_test GET "/v1/products?page=1&pageSize=5&sortBy=price&sortOrder=asc" "$LOAD_TEST_ITERATIONS"
+  load_test GET "/v1/customers/${CUSTOMER_ID}" "$LOAD_TEST_ITERATIONS"
+  load_test GET "/v1/orders/${ORDER_ID}" "$LOAD_TEST_ITERATIONS"
+fi
+
+run_heavy_searches
 
 log "Remover produto"
 delete_product "/v1/products/${PRODUCT_ID}"

@@ -133,22 +133,16 @@ public class ProductHandler(AppDbContext context)
             product.Price);
     }
 
-    public async Task<DeleteProductResult> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var product = await _context.Products.FirstOrDefaultAsync(entity => entity.Id == id, cancellationToken);
         if (product is null)
-            return DeleteProductResult.NotFound;
-
-        var inUse = await _context.OrderLines
-            .AsNoTracking()
-            .AnyAsync(line => line.ProductId == id, cancellationToken);
-        if (inUse)
-            return DeleteProductResult.InUse;
+            return false;
 
         _context.Products.Remove(product);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return DeleteProductResult.Deleted;
+        return true;
     }
 
     private static string EscapeLikePattern(string value)
@@ -183,11 +177,4 @@ public class ProductHandler(AppDbContext context)
             _ => query.OrderBy(product => product.Title)
         };
     }
-}
-
-public enum DeleteProductResult
-{
-    NotFound,
-    InUse,
-    Deleted
 }

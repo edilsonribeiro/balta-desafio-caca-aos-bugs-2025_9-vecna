@@ -6,6 +6,7 @@ using BugStore.Application.Handlers.Reports;
 using BugStore.Application.Responses.Reports;
 using BugStore.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Scalar.AspNetCore;
 using CustomerCreateRequest = BugStore.Application.Requests.Customers.Create;
 using CustomerUpdateRequest = BugStore.Application.Requests.Customers.Update;
 using OrderCreateRequest = BugStore.Application.Requests.Orders.Create;
@@ -16,6 +17,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=app.db"));
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApi();
 builder.Services.AddScoped<CustomerHandler>();
 builder.Services.AddScoped<ProductHandler>();
 builder.Services.AddScoped<OrderHandler>();
@@ -30,6 +33,8 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.MapGet("/", () => "Hello World!");
+app.MapOpenApi();
+app.MapScalarApiReference();
 
 app.MapGet("/v1/customers", async ([AsParameters] ListQuery query, CustomerHandler handler, CancellationToken cancellationToken) =>
 {
@@ -97,13 +102,10 @@ app.MapPut("/v1/products/{id:guid}", async (Guid id, ProductUpdateRequest reques
 
 app.MapDelete("/v1/products/{id:guid}", async (Guid id, ProductHandler handler, CancellationToken cancellationToken) =>
 {
-    var result = await handler.DeleteAsync(id, cancellationToken);
-    return result switch
-    {
-        DeleteProductResult.Deleted => Results.NoContent(),
-        DeleteProductResult.NotFound => Results.NotFound(),
-        DeleteProductResult.InUse => Results.Conflict("Não é possível remover um produto associado a pedidos.")
-    };
+    var deleted = await handler.DeleteAsync(id, cancellationToken);
+    return deleted
+        ? Results.NoContent()
+        : Results.NotFound();
 });
 
 app.MapGet("/v1/orders", async ([AsParameters] ListQuery query, OrderHandler handler, CancellationToken cancellationToken) =>
@@ -127,13 +129,13 @@ app.MapPost("/v1/orders", async (OrderCreateRequest request, OrderHandler handle
         : Results.Created($"/v1/orders/{order.Id}", order);
 });
 
-app.MapGet("/v1/reports/sales-by-customer", async ([AsParameters] ReportQuery query, ReportHandler handler, CancellationToken cancellationToken) =>
+app.MapGet("/v1/reports/sales-by-customer/{customerId:guid}", async (Guid customerId, [AsParameters] ReportQuery query, ReportHandler handler, CancellationToken cancellationToken) =>
 {
     if (query.StartDate.HasValue && query.EndDate.HasValue && query.StartDate > query.EndDate)
         return Results.BadRequest("O parâmetro startDate não pode ser maior que endDate.");
 
-    var result = await handler.GetSalesByCustomerAsync(query.StartDate, query.EndDate, cancellationToken);
-    return Results.Ok(result);
+    var result = await handler.GetSalesByCustomerAsync(customerId, query.StartDate, query.EndDate, cancellationToken);
+    return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
 app.MapGet("/v1/reports/revenue-by-period", async ([AsParameters] ReportQuery query, ReportHandler handler, CancellationToken cancellationToken) =>

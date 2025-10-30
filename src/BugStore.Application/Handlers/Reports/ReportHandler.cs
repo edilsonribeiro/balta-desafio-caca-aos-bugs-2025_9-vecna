@@ -6,59 +6,85 @@ namespace BugStore.Application.Handlers.Reports;
 
 public class ReportHandler(AppDbContext context)
 {
-    public async Task<IReadOnlyList<SalesByCustomerResponse>> GetSalesByCustomerAsync(
+    public async Task<SalesByCustomerResponse?> GetSalesByCustomerAsync(
+        Guid customerId,
         DateTime? startDate,
         DateTime? endDate,
         CancellationToken cancellationToken = default)
     {
+        var customer = await context.Customers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == customerId, cancellationToken);
+
+        if (customer is null)
+            return null;
+
         var (normalizedStart, normalizedEnd) = NormalizeDateRange(startDate, endDate);
 
-        var query = context.Orders.AsNoTracking();
+        var ordersQuery = context.Orders
+            .AsNoTracking()
+            .Include(order => order.Lines)
+                .ThenInclude(line => line.Product)
+            .Where(order => order.CustomerId == customerId);
 
         if (normalizedStart.HasValue)
-            query = query.Where(order => order.CreatedAt >= normalizedStart.Value);
+            ordersQuery = ordersQuery.Where(order => order.CreatedAt >= normalizedStart.Value);
 
         if (normalizedEnd.HasValue)
-            query = query.Where(order => order.CreatedAt <= normalizedEnd.Value);
+            ordersQuery = ordersQuery.Where(order => order.CreatedAt <= normalizedEnd.Value);
 
-        var orderSummaries = await query
-            .Select(order => new OrderCustomerSummary(
-                order.CustomerId,
-                order.Customer != null ? order.Customer.Name : string.Empty,
-                order.CreatedAt,
-                order.Lines.Sum(line => line.Quantity),
-                order.Lines.Sum(line => line.Total)))
+        var orders = await ordersQuery
+            .OrderByDescending(order => order.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return orderSummaries
-            .GroupBy(summary => new { summary.CustomerId, summary.CustomerName })
-            .Select(group =>
+        var orderResponses = orders
+            .Select(order =>
             {
-                var ordersCount = group.Count();
-                var totalItems = group.Sum(item => item.TotalItems);
-                var rawTotalAmount = group.Sum(item => item.TotalAmount);
-                var totalAmount = RoundCurrency(rawTotalAmount);
-                var averageTicket = RoundCurrency(ordersCount > 0 ? rawTotalAmount / ordersCount : 0m);
-                var largestOrder = RoundCurrency(group.Max(item => item.TotalAmount));
-                var smallestOrder = RoundCurrency(group.Min(item => item.TotalAmount));
-                var firstOrderAt = NormalizeTimestamp(group.Min(item => item.CreatedAt));
-                var lastOrderAt = NormalizeTimestamp(group.Max(item => item.CreatedAt));
+                var lines = order.Lines
+                    .Select(line =>
+                    {
+                        var total = RoundCurrency(line.Total);
+                        var quantity = line.Quantity;
+                        var product = line.Product;
+                        var productTitle = product?.Title ?? string.Empty;
+                        var productDescription = product?.Description ?? string.Empty;
+                        var productPrice = RoundCurrency(product?.Price ?? 0m);
 
-                return new SalesByCustomerResponse(
-                    group.Key.CustomerId,
-                    group.Key.CustomerName,
-                    ordersCount,
-                    totalItems,
+                        return new SalesByCustomerOrderLine(
+                            line.Id,
+                            line.ProductId,
+                            productTitle,
+                            productDescription,
+                            productPrice,
+                            quantity,
+                            total);
+                    })
+                    .ToList();
+
+                var totalAmount = RoundCurrency(lines.Sum(line => line.Total));
+
+                return new SalesByCustomerOrder(
+                    order.Id,
                     totalAmount,
-                    averageTicket,
-                    largestOrder,
-                    smallestOrder,
-                    firstOrderAt,
-                    lastOrderAt);
+                    NormalizeTimestamp(order.CreatedAt),
+                    NormalizeTimestamp(order.UpdatedAt),
+                    lines);
             })
-            .OrderByDescending(result => result.TotalAmount)
-            .ThenBy(result => result.CustomerName)
             .ToList();
+
+        var ordersCount = orderResponses.Count;
+        var totalItems = orderResponses.Sum(order => order.Lines.Sum(line => line.Quantity));
+        var totalAmount = RoundCurrency(orderResponses.Sum(order => order.Total));
+
+        return new SalesByCustomerResponse(
+            customer.Id,
+            customer.Name,
+            customer.Email,
+            customer.Phone,
+            ordersCount,
+            totalItems,
+            totalAmount,
+            orderResponses);
     }
 
     public async Task<IReadOnlyList<RevenueByPeriodResponse>> GetRevenueByPeriodAsync(
@@ -155,7 +181,6 @@ public class ReportHandler(AppDbContext context)
     }
 
     private sealed record OrderRevenueSummary(DateTime CreatedAt, decimal Total, int TotalItems);
-    private sealed record OrderCustomerSummary(Guid CustomerId, string CustomerName, DateTime CreatedAt, int TotalItems, decimal TotalAmount);
 
     private static decimal RoundCurrency(decimal value) =>
         Math.Round(value, 2, MidpointRounding.AwayFromZero);
