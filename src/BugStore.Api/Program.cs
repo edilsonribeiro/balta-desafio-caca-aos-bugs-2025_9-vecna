@@ -6,8 +6,11 @@ using BugStore.Application.Services.Customers;
 using BugStore.Domain.Repositories;
 using BugStore.Infrastructure.Data;
 using BugStore.Infrastructure.Repositories.Customers;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -28,6 +31,12 @@ builder.Services.AddSingleton<ICustomerCacheSignal, CustomerCacheSignal>();
 builder.Services.AddScoped<ICustomerAppService, CustomerAppService>();
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.Configure<JsonOptions>(options =>
+{
+    options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+});
 
 if (builder.Environment.IsProduction())
 {
