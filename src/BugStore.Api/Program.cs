@@ -1,5 +1,6 @@
-
+using BugStore.Application.Contracts.Customers;
 using BugStore.Application.Handlers.Customers;
+using BugStore.Application.Services.Customers;
 using BugStore.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
@@ -12,6 +13,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CustomerHandler>());
+builder.Services.AddScoped<ICustomerAppService, CustomerAppService>();
 
 var app = builder.Build();
 
