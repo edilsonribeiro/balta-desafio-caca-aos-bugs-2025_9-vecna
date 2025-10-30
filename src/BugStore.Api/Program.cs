@@ -2,7 +2,9 @@ using BugStore.Application.Contracts.Customers;
 using BugStore.Application.Handlers.Customers;
 using BugStore.Application.Mapping.Profiles;
 using BugStore.Application.Services.Customers;
+using BugStore.Domain.Repositories;
 using BugStore.Infrastructure.Data;
+using BugStore.Infrastructure.Repositories.Customers;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 
@@ -16,6 +18,8 @@ builder.Services.AddControllers();
 builder.Services.AddAutoMapper(typeof(CustomerProfile).Assembly);
 builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CustomerHandler>());
 builder.Services.AddScoped<ICustomerAppService, CustomerAppService>();
+builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 var app = builder.Build();
 

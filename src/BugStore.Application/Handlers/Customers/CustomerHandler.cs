@@ -1,8 +1,7 @@
-using System;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using BugStore.Domain.Entities;
-using BugStore.Infrastructure.Data;
+using BugStore.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using BugStore.Application.Responses.Common;
 using CreateCustomerRequest = BugStore.Application.Requests.Customers.Create;
@@ -40,12 +39,14 @@ public class CustomerHandler :
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
 
-    private readonly AppDbContext _context;
+    private readonly ICustomerRepository _customerRepository;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
 
-    public CustomerHandler(AppDbContext context, IMapper mapper)
+    public CustomerHandler(ICustomerRepository customerRepository, IUnitOfWork unitOfWork, IMapper mapper)
     {
-        _context = context;
+        _customerRepository = customerRepository;
+        _unitOfWork = unitOfWork;
         _mapper = mapper;
     }
 
@@ -66,7 +67,8 @@ public class CustomerHandler :
 
     public async Task<IReadOnlyList<GetCustomersResponse>> GetAsync(CancellationToken cancellationToken = default)
     {
-        return await _context.Customers
+        return await _customerRepository
+            .Query()
             .AsNoTracking()
             .OrderBy(customer => customer.Name)
             .ProjectTo<GetCustomersResponse>(_mapper.ConfigurationProvider)
@@ -83,7 +85,8 @@ public class CustomerHandler :
     {
         var (normalizedPage, normalizedPageSize) = NormalizePagination(page, pageSize);
 
-        var query = _context.Customers
+        var query = _customerRepository
+            .Query()
             .AsNoTracking()
             .AsQueryable();
 
@@ -111,7 +114,8 @@ public class CustomerHandler :
 
     public async Task<GetCustomerByIdResponse?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var customer = await _context.Customers
+        var customer = await _customerRepository
+            .Query()
             .AsNoTracking()
             .FirstOrDefaultAsync(customer => customer.Id == id, cancellationToken);
 
@@ -123,33 +127,33 @@ public class CustomerHandler :
         var customer = _mapper.Map<Customer>(request);
         customer.Id = Guid.NewGuid();
 
-        _context.Customers.Add(customer);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _customerRepository.AddAsync(customer, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return _mapper.Map<CreateCustomerResponse>(customer);
     }
 
     public async Task<UpdateCustomerResponse?> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken cancellationToken = default)
     {
-        var customer = await _context.Customers.FirstOrDefaultAsync(entity => entity.Id == id, cancellationToken);
+        var customer = await _customerRepository.GetByIdAsync(id, cancellationToken);
         if (customer is null)
             return null;
 
         _mapper.Map(request, customer);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return _mapper.Map<UpdateCustomerResponse>(customer);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var customer = await _context.Customers.FirstOrDefaultAsync(entity => entity.Id == id, cancellationToken);
+        var customer = await _customerRepository.GetByIdAsync(id, cancellationToken);
         if (customer is null)
             return false;
 
-        _context.Customers.Remove(customer);
-        await _context.SaveChangesAsync(cancellationToken);
+        _customerRepository.Remove(customer);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
 
