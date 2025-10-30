@@ -1,5 +1,6 @@
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using BugStore.Application.Caching;
 using BugStore.Application.Queries.Customers.Models;
 using BugStore.Application.Responses.Common;
 using BugStore.Domain.Entities;
@@ -10,7 +11,7 @@ using MediatR;
 
 namespace BugStore.Application.Handlers.Customers.Queries;
 
-public class CustomerQueryHandler(ICustomerRepository customerRepository, IMapper mapper, IMemoryCache cache) :
+public class CustomerQueryHandler(ICustomerRepository customerRepository, IMapper mapper, IMemoryCache cache, ICustomerCacheSignal cacheSignal) :
     IRequestHandler<SearchCustomersQuery, PagedResult<CustomerListItem>>,
     IRequestHandler<GetCustomerByIdQuery, CustomerDetails?>
 {
@@ -20,6 +21,7 @@ public class CustomerQueryHandler(ICustomerRepository customerRepository, IMappe
     private readonly ICustomerRepository _customerRepository = customerRepository;
     private readonly IMapper _mapper = mapper;
     private readonly IMemoryCache _cache = cache;
+    private readonly ICustomerCacheSignal _cacheSignal = cacheSignal;
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(1);
 
     public async Task<PagedResult<CustomerListItem>> Handle(SearchCustomersQuery request, CancellationToken cancellationToken)
@@ -57,7 +59,7 @@ public class CustomerQueryHandler(ICustomerRepository customerRepository, IMappe
             .ToListAsync(cancellationToken);
 
         var result = new PagedResult<CustomerListItem>(customers, total, page, pageSize);
-        _cache.Set(cacheKey, result, CacheDuration);
+        _cache.Set(cacheKey, result, CreateEntryOptions());
 
         return result;
     }
@@ -78,7 +80,7 @@ public class CustomerQueryHandler(ICustomerRepository customerRepository, IMappe
         var details = _mapper.Map<CustomerDetails?>(customer);
         if (details is not null)
         {
-            _cache.Set(cacheKey, details, CacheDuration);
+            _cache.Set(cacheKey, details, CreateEntryOptions());
         }
 
         return details;
@@ -119,4 +121,9 @@ public class CustomerQueryHandler(ICustomerRepository customerRepository, IMappe
         $"customers:search:{term}:{page}:{pageSize}:{sortBy}:{sortOrder}";
 
     private static string BuildByIdCacheKey(Guid id) => $"customers:details:{id}";
+
+    private MemoryCacheEntryOptions CreateEntryOptions() =>
+        new MemoryCacheEntryOptions()
+            .SetAbsoluteExpiration(CacheDuration)
+            .AddExpirationToken(_cacheSignal.CreateToken());
 }

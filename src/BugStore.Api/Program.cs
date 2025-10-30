@@ -1,3 +1,4 @@
+using BugStore.Application.Caching;
 using BugStore.Application.Contracts.Customers;
 using BugStore.Application.Handlers.Customers.Queries;
 using BugStore.Application.Mapping.Profiles;
@@ -10,7 +11,7 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddDbContext<AppDbContext>(options =>
+builder.Services.AddDbContextPool<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=app.db"));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
@@ -18,6 +19,7 @@ builder.Services.AddControllers();
 builder.Services.AddAutoMapper(typeof(CustomerProfile).Assembly);
 builder.Services.AddMemoryCache();
 builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CustomerQueryHandler>());
+builder.Services.AddSingleton<ICustomerCacheSignal, CustomerCacheSignal>();
 builder.Services.AddScoped<ICustomerAppService, CustomerAppService>();
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();

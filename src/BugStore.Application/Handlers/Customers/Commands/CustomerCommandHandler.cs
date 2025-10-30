@@ -1,4 +1,5 @@
 using AutoMapper;
+using BugStore.Application.Caching;
 using BugStore.Domain.Entities;
 using BugStore.Domain.Repositories;
 using MediatR;
@@ -15,12 +16,14 @@ public class CustomerCommandHandler :
     private readonly ICustomerRepository _customerRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
+    private readonly ICustomerCacheSignal _cacheSignal;
 
-    public CustomerCommandHandler(ICustomerRepository customerRepository, IUnitOfWork unitOfWork, IMapper mapper)
+    public CustomerCommandHandler(ICustomerRepository customerRepository, IUnitOfWork unitOfWork, IMapper mapper, ICustomerCacheSignal cacheSignal)
     {
         _customerRepository = customerRepository;
         _unitOfWork = unitOfWork;
         _mapper = mapper;
+        _cacheSignal = cacheSignal;
     }
 
     public async Task<CreateCustomerResponse> Handle(CreateCustomerCommand request, CancellationToken cancellationToken)
@@ -30,6 +33,7 @@ public class CustomerCommandHandler :
 
         await _customerRepository.AddAsync(customer, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _cacheSignal.SignalChange();
 
         return _mapper.Map<CreateCustomerResponse>(customer);
     }
@@ -43,6 +47,7 @@ public class CustomerCommandHandler :
         _mapper.Map(request.Request, customer);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _cacheSignal.SignalChange();
 
         return _mapper.Map<UpdateCustomerResponse>(customer);
     }
@@ -55,6 +60,7 @@ public class CustomerCommandHandler :
 
         _customerRepository.Remove(customer);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _cacheSignal.SignalChange();
         return true;
     }
 }

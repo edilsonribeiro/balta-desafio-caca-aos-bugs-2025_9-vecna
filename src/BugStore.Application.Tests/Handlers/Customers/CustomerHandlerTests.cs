@@ -1,4 +1,5 @@
 using AutoMapper;
+using BugStore.Application.Caching;
 using BugStore.Application.Handlers.Customers.Commands;
 using BugStore.Application.Handlers.Customers.Queries;
 using BugStore.Application.Mapping.Profiles;
@@ -386,17 +387,18 @@ public sealed class CustomerHandlerTests
         Assert.Equal(new[] { "Alpha", "Beta", "Gamma" }, result.Items.Select(x => x.Name));
     }
 
-    private static CustomerCommandHandler CreateCommandHandler(AppDbContext context)
+    private static CustomerCommandHandler CreateCommandHandler(AppDbContext context, ICustomerCacheSignal? cacheSignal = null)
     {
+        cacheSignal ??= new CustomerCacheSignal();
         var repository = new CustomerRepository(context);
         var unitOfWork = new UnitOfWork(context);
-        return new CustomerCommandHandler(repository, unitOfWork, Mapper);
+        return new CustomerCommandHandler(repository, unitOfWork, Mapper, cacheSignal);
     }
 
-    private static CustomerQueryHandler CreateQueryHandler(AppDbContext context, IMemoryCache cache)
+    private static CustomerQueryHandler CreateQueryHandler(AppDbContext context, IMemoryCache cache, ICustomerCacheSignal? cacheSignal = null)
     {
         var repository = new CustomerRepository(context);
-        return new CustomerQueryHandler(repository, Mapper, cache);
+        return new CustomerQueryHandler(repository, Mapper, cache, cacheSignal ?? new CustomerCacheSignal());
     }
 
     private static MemoryCache CreateCache() => new(new MemoryCacheOptions());
