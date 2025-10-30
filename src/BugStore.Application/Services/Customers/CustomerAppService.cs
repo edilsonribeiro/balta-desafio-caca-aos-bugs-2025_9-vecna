@@ -1,5 +1,6 @@
 using BugStore.Application.Contracts.Customers;
-using BugStore.Application.Handlers.Customers;
+using BugStore.Application.Handlers.Customers.Commands;
+using BugStore.Application.Handlers.Customers.Queries;
 using BugStore.Application.Responses.Common;
 using MediatR;
 using CreateCustomerRequest = BugStore.Application.Requests.Customers.Create;

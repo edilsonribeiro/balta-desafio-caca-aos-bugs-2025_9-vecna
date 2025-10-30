@@ -1,5 +1,5 @@
 using BugStore.Application.Contracts.Customers;
-using BugStore.Application.Handlers.Customers;
+using BugStore.Application.Handlers.Customers.Queries;
 using BugStore.Application.Mapping.Profiles;
 using BugStore.Application.Services.Customers;
 using BugStore.Domain.Repositories;
@@ -16,7 +16,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 builder.Services.AddAutoMapper(typeof(CustomerProfile).Assembly);
-builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CustomerHandler>());
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CustomerQueryHandler>());
 builder.Services.AddScoped<ICustomerAppService, CustomerAppService>();
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
