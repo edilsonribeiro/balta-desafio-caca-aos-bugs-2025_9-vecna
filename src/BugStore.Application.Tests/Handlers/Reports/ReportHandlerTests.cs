@@ -2,13 +2,14 @@ using BugStore.Application.Handlers.Reports;
 using BugStore.Application.Responses.Reports;
 using BugStore.Application.Tests.Support;
 using BugStore.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace BugStore.Application.Tests.Handlers.Reports;
 
 public sealed class ReportHandlerTests
 {
     [Fact]
-    public async Task GetSalesByCustomerAsync_ShouldAggregateDataPerCustomer()
+    public async Task GetSalesByCustomerAsync_ShouldReturnDetailedOrdersForCustomer()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -43,35 +44,44 @@ public sealed class ReportHandlerTests
 
         await context.SaveChangesAsync(cancellationToken);
 
+        var persistedWayneOrders = await context.Orders
+            .Where(order => order.CustomerId == wayne.Id)
+            .Include(order => order.Lines)
+            .ToListAsync(cancellationToken);
+        Assert.Equal(2, persistedWayneOrders.Count);
+        Assert.All(persistedWayneOrders, order =>
+        {
+            Assert.NotEmpty(order.Lines);
+            Assert.All(order.Lines, line =>
+            {
+                Assert.True(line.Quantity > 0);
+                Assert.True(line.Total > 0);
+            });
+        });
+
         var handler = new ReportHandler(context);
 
-        var result = await handler.GetSalesByCustomerAsync(null, null, cancellationToken);
+        var wayneSummary = await handler.GetSalesByCustomerAsync(wayne.Id, null, null, cancellationToken);
+        var kentSummary = await handler.GetSalesByCustomerAsync(kent.Id, null, null, cancellationToken);
 
-        Assert.Collection(result,
-            first =>
-            {
-                Assert.Equal(wayne.Id, first.CustomerId);
-                Assert.Equal(2, first.OrdersCount);
-                Assert.Equal(3, first.TotalItems);
-                Assert.Equal(125m, first.TotalAmount);
-                Assert.Equal(62.5m, first.AverageTicket);
-                Assert.Equal(100m, first.LargestOrderTotal);
-                Assert.Equal(25m, first.SmallestOrderTotal);
-                Assert.Equal(wayneFirstOrderAt, first.FirstOrderAt);
-                Assert.Equal(wayneSecondOrderAt, first.LastOrderAt);
-            },
-            second =>
-            {
-                Assert.Equal(kent.Id, second.CustomerId);
-                Assert.Equal(1, second.OrdersCount);
-                Assert.Equal(3, second.TotalItems);
-                Assert.Equal(90m, second.TotalAmount);
-                Assert.Equal(90m, second.AverageTicket);
-                Assert.Equal(90m, second.LargestOrderTotal);
-                Assert.Equal(90m, second.SmallestOrderTotal);
-                Assert.Equal(kentOrderAt, second.FirstOrderAt);
-                Assert.Equal(kentOrderAt, second.LastOrderAt);
-            });
+        Assert.NotNull(wayneSummary);
+        Assert.Equal(wayne.Id, wayneSummary.CustomerId);
+        Assert.Equal("Bruce Wayne", wayneSummary.CustomerName);
+        Assert.Equal(2, wayneSummary.OrdersCount);
+        Assert.Equal(2, wayneSummary.Orders.Count);
+        var wayneOrderDates = wayneSummary.Orders.Select(order => order.CreatedAt).ToArray();
+        Assert.Equal(new[] { wayneSecondOrderAt, wayneFirstOrderAt }, wayneOrderDates);
+        Assert.All(wayneSummary.Orders, order => Assert.Empty(order.Lines));
+        var wayneTotalAmount = wayneSummary.Orders.Sum(order => order.Total);
+        Assert.Equal(wayneTotalAmount, wayneSummary.TotalAmount);
+
+        Assert.NotNull(kentSummary);
+        Assert.Equal(kent.Id, kentSummary.CustomerId);
+        Assert.Equal(1, kentSummary.OrdersCount);
+        var kentOrder = Assert.Single(kentSummary.Orders);
+        Assert.Equal(kentOrderAt, kentOrder.CreatedAt);
+        Assert.Empty(kentOrder.Lines);
+        Assert.Equal(kentOrder.Total, kentSummary.TotalAmount);
     }
 
     [Fact]
@@ -101,18 +111,18 @@ public sealed class ReportHandlerTests
         await context.SaveChangesAsync(cancellationToken);
 
         var report = await handler.GetSalesByCustomerAsync(
+            customer.Id,
             new DateTime(2025, 2, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2025, 3, 1, 0, 0, 0, DateTimeKind.Utc),
             cancellationToken);
 
-        var summary = Assert.Single(report);
-        Assert.Equal(customer.Id, summary.CustomerId);
-        Assert.Equal(1, summary.OrdersCount);
-        Assert.Equal(2, summary.TotalItems);
-        Assert.Equal(90m, summary.TotalAmount);
-        Assert.Equal(90m, summary.AverageTicket);
-        Assert.Equal(recentOrderAt, summary.FirstOrderAt);
-        Assert.Equal(recentOrderAt, summary.LastOrderAt);
+        Assert.NotNull(report);
+        Assert.Equal(customer.Id, report.CustomerId);
+        Assert.Equal(1, report.OrdersCount);
+        var order = Assert.Single(report.Orders);
+        Assert.Equal(recentOrderAt, order.CreatedAt);
+        Assert.Empty(order.Lines);
+        Assert.Equal(order.Total, report.TotalAmount);
     }
 
     [Fact]

@@ -1,34 +1,44 @@
-using System.Linq;
-using BugStore.Application.Handlers.Customers;
+using AutoMapper;
+using BugStore.Application.Handlers.Customers.Commands;
+using BugStore.Application.Handlers.Customers.Queries;
+using BugStore.Application.Mapping.Profiles;
 using BugStore.Application.Requests.Customers;
 using BugStore.Application.Tests.Support;
 using BugStore.Domain.Entities;
 using BugStore.Infrastructure.Data;
+using BugStore.Infrastructure.Repositories.Customers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace BugStore.Application.Tests.Handlers.Customers;
 
 public sealed class CustomerHandlerTests
 {
+    private static readonly IMapper Mapper = new MapperConfiguration(configuration =>
+        configuration.AddProfile<CustomerProfile>())
+        .CreateMapper();
+
     [Fact]
-    public async Task GetAsync_ShouldReturnCustomersOrderedByName()
+    public async Task Search_ShouldReturnCustomersOrderedByName()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
         await SeedCustomersAsync(context, cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var customers = await handler.GetAsync(cancellationToken);
+        var query = new SearchCustomersQuery(null, SortBy: "name", SortOrder: "asc");
+        var result = await handler.Handle(query, cancellationToken);
 
-        Assert.Equal(3, customers.Count);
-        Assert.Collection(customers,
+        Assert.Equal(3, result.Items.Count);
+        Assert.Collection(result.Items,
             customer => Assert.Equal("Alfred Pennyworth", customer.Name),
             customer => Assert.Equal("Barbara Gordon", customer.Name),
             customer => Assert.Equal("Harvey Bullock", customer.Name));
     }
 
     [Fact]
-    public async Task GetByIdAsync_ShouldReturnMatchingCustomer()
+    public async Task GetCustomerById_ShouldReturnMatchingCustomer()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -42,9 +52,11 @@ public sealed class CustomerHandlerTests
             BirthDate = new DateTime(1960, 1, 1, 0, 0, 0, DateTimeKind.Utc)
         });
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var customer = await handler.GetByIdAsync(customerId, cancellationToken);
+        var query = new GetCustomerByIdQuery(customerId);
+        var customer = await handler.Handle(query, cancellationToken);
 
         Assert.NotNull(customer);
         Assert.Equal(customerId, customer.Id);
@@ -52,23 +64,25 @@ public sealed class CustomerHandlerTests
     }
 
     [Fact]
-    public async Task GetByIdAsync_ShouldReturnNull_WhenCustomerDoesNotExist()
+    public async Task GetCustomerById_ShouldReturnNull_WhenCustomerDoesNotExist()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var customer = await handler.GetByIdAsync(Guid.NewGuid(), cancellationToken);
+        var query = new GetCustomerByIdQuery(Guid.NewGuid());
+        var customer = await handler.Handle(query, cancellationToken);
 
         Assert.Null(customer);
     }
 
     [Fact]
-    public async Task CreateAsync_ShouldPersistAndReturnCustomer()
+    public async Task CreateCustomer_ShouldPersistAndReturnCustomer()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var handler = new CustomerHandler(context);
+        var handler = CreateCommandHandler(context);
         var request = new Create
         {
             Name = "Selina Kyle",
@@ -77,7 +91,8 @@ public sealed class CustomerHandlerTests
             BirthDate = new DateTime(1993, 7, 17, 0, 0, 0, DateTimeKind.Utc)
         };
 
-        var response = await handler.CreateAsync(request, cancellationToken);
+        var command = new CreateCustomerCommand(request);
+        var response = await handler.Handle(command, cancellationToken);
 
         var customer = await context.Customers.SingleAsync(cancellationToken);
         Assert.Equal(customer.Id, response.Id);
@@ -88,11 +103,11 @@ public sealed class CustomerHandlerTests
     }
 
     [Fact]
-    public async Task UpdateAsync_ShouldReturnNull_WhenCustomerIsMissing()
+    public async Task UpdateCustomer_ShouldReturnNull_WhenCustomerIsMissing()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var handler = new CustomerHandler(context);
+        var handler = CreateCommandHandler(context);
         var request = new Update
         {
             Name = "Dick Grayson",
@@ -101,13 +116,14 @@ public sealed class CustomerHandlerTests
             BirthDate = new DateTime(1990, 3, 1, 0, 0, 0, DateTimeKind.Utc)
         };
 
-        var response = await handler.UpdateAsync(Guid.NewGuid(), request, cancellationToken);
+        var command = new UpdateCustomerCommand(Guid.NewGuid(), request);
+        var response = await handler.Handle(command, cancellationToken);
 
         Assert.Null(response);
     }
 
     [Fact]
-    public async Task UpdateAsync_ShouldPersistChanges()
+    public async Task UpdateCustomer_ShouldPersistChanges()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -121,7 +137,7 @@ public sealed class CustomerHandlerTests
         };
         context.Customers.Add(customer);
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        var handler = CreateCommandHandler(context);
         var request = new Update
         {
             Name = "Updated Name",
@@ -130,7 +146,8 @@ public sealed class CustomerHandlerTests
             BirthDate = new DateTime(1985, 12, 12, 0, 0, 0, DateTimeKind.Utc)
         };
 
-        var response = await handler.UpdateAsync(customer.Id, request, cancellationToken);
+        var command = new UpdateCustomerCommand(customer.Id, request);
+        var response = await handler.Handle(command, cancellationToken);
 
         Assert.NotNull(response);
         Assert.Equal("Updated Name", response.Name);
@@ -140,19 +157,20 @@ public sealed class CustomerHandlerTests
     }
 
     [Fact]
-    public async Task DeleteAsync_ShouldReturnFalse_WhenCustomerNotFound()
+    public async Task DeleteCustomer_ShouldReturnFalse_WhenCustomerNotFound()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var handler = new CustomerHandler(context);
+        var handler = CreateCommandHandler(context);
 
-        var deleted = await handler.DeleteAsync(Guid.NewGuid(), cancellationToken);
+        var command = new DeleteCustomerCommand(Guid.NewGuid());
+        var deleted = await handler.Handle(command, cancellationToken);
 
         Assert.False(deleted);
     }
 
     [Fact]
-    public async Task DeleteAsync_ShouldRemoveCustomer()
+    public async Task DeleteCustomer_ShouldRemoveCustomer()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -166,23 +184,26 @@ public sealed class CustomerHandlerTests
         };
         context.Customers.Add(customer);
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        var handler = CreateCommandHandler(context);
 
-        var deleted = await handler.DeleteAsync(customer.Id, cancellationToken);
+        var command = new DeleteCustomerCommand(customer.Id);
+        var deleted = await handler.Handle(command, cancellationToken);
 
         Assert.True(deleted);
         Assert.Empty(context.Customers);
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldReturnAllCustomers_WhenTermIsNull()
+    public async Task Search_ShouldReturnAllCustomers_WhenTermIsNull()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
         await SeedCustomersAsync(context, cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var result = await handler.SearchAsync(null, cancellationToken: cancellationToken);
+        var query = new SearchCustomersQuery(null);
+        var result = await handler.Handle(query, cancellationToken);
 
         Assert.Equal(3, result.Total);
         Assert.Equal(1, result.Page);
@@ -191,7 +212,7 @@ public sealed class CustomerHandlerTests
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldFilterByPartialMatchAcrossFields()
+    public async Task Search_ShouldFilterByPartialMatchAcrossFields()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -213,11 +234,12 @@ public sealed class CustomerHandlerTests
                 BirthDate = new DateTime(1995, 8, 16, 0, 0, 0, DateTimeKind.Utc)
             });
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var matchesByName = await handler.SearchAsync("Dick", cancellationToken: cancellationToken);
-        var matchesByEmail = await handler.SearchAsync("batfamily", cancellationToken: cancellationToken);
-        var matchesByPhone = await handler.SearchAsync("5555", cancellationToken: cancellationToken);
+        var matchesByName = await handler.Handle(new SearchCustomersQuery("Dick"), cancellationToken);
+        var matchesByEmail = await handler.Handle(new SearchCustomersQuery("batfamily"), cancellationToken);
+        var matchesByPhone = await handler.Handle(new SearchCustomersQuery("5555"), cancellationToken);
 
         Assert.Single(matchesByName.Items);
         Assert.Equal("Dick Grayson", matchesByName.Items[0].Name);
@@ -228,7 +250,7 @@ public sealed class CustomerHandlerTests
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldTreatPercentAndUnderscoreAsLiterals()
+    public async Task Search_ShouldTreatPercentAndUnderscoreAsLiterals()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -250,16 +272,17 @@ public sealed class CustomerHandlerTests
                 BirthDate = new DateTime(1980, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var result = await handler.SearchAsync("100%", cancellationToken: cancellationToken);
+        var result = await handler.Handle(new SearchCustomersQuery("100%"), cancellationToken);
 
         Assert.Single(result.Items);
         Assert.Equal("Match 100%", result.Items[0].Name);
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldRespectPagination()
+    public async Task Search_ShouldRespectPagination()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -275,10 +298,11 @@ public sealed class CustomerHandlerTests
             });
         }
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var firstPage = await handler.SearchAsync(null, page: 1, pageSize: 10, cancellationToken: cancellationToken);
-        var thirdPage = await handler.SearchAsync(null, page: 3, pageSize: 10, cancellationToken: cancellationToken);
+        var firstPage = await handler.Handle(new SearchCustomersQuery(null, Page: 1, PageSize: 10), cancellationToken);
+        var thirdPage = await handler.Handle(new SearchCustomersQuery(null, Page: 3, PageSize: 10), cancellationToken);
 
         Assert.Equal(30, firstPage.Total);
         Assert.Equal(10, firstPage.Items.Count);
@@ -288,7 +312,7 @@ public sealed class CustomerHandlerTests
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldSortByEmailDescending()
+    public async Task Search_ShouldSortByEmailDescending()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -318,32 +342,34 @@ public sealed class CustomerHandlerTests
                 BirthDate = new DateTime(1994, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var result = await handler.SearchAsync(null, sortBy: "email", sortOrder: "desc", cancellationToken: cancellationToken);
+        var result = await handler.Handle(new SearchCustomersQuery(null, SortBy: "email", SortOrder: "desc"), cancellationToken);
 
         Assert.Equal(new[] { "c@example.com", "b@example.com", "a@example.com" }, result.Items.Select(x => x.Email));
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldSortByNameDescending_WhenRequested()
+    public async Task Search_ShouldSortByBirthDateDescending()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
         context.Customers.AddRange(
             new Customer { Id = Guid.NewGuid(), Name = "Charlie", Email = "charlie@example.com", Phone = "1", BirthDate = new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new Customer { Id = Guid.NewGuid(), Name = "Alice", Email = "alice@example.com", Phone = "2", BirthDate = new DateTime(1991, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new Customer { Id = Guid.NewGuid(), Name = "Bob", Email = "bob@example.com", Phone = "3", BirthDate = new DateTime(1992, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
+            new Customer { Id = Guid.NewGuid(), Name = "Alice", Email = "alice@example.com", Phone = "2", BirthDate = new DateTime(1993, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new Customer { Id = Guid.NewGuid(), Name = "Bob", Email = "bob@example.com", Phone = "3", BirthDate = new DateTime(1991, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var result = await handler.SearchAsync(null, sortBy: "name", sortOrder: "desc", cancellationToken: cancellationToken);
+        var result = await handler.Handle(new SearchCustomersQuery(null, SortBy: "birthdate", SortOrder: "desc"), cancellationToken);
 
-        Assert.Equal(new[] { "Charlie", "Bob", "Alice" }, result.Items.Select(x => x.Name));
+        Assert.Equal(new[] { new DateTime(1993, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(1991, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc) }, result.Items.Select(x => x.BirthDate));
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldFallbackToName_WhenSortByIsUnknown()
+    public async Task Search_ShouldFallbackToName_WhenSortByIsUnknown()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -352,12 +378,28 @@ public sealed class CustomerHandlerTests
             new Customer { Id = Guid.NewGuid(), Name = "Alpha", Email = "a@example.com", Phone = "2", BirthDate = new DateTime(1991, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
             new Customer { Id = Guid.NewGuid(), Name = "Beta", Email = "b@example.com", Phone = "3", BirthDate = new DateTime(1992, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
         await context.SaveChangesAsync(cancellationToken);
-        var handler = new CustomerHandler(context);
+        using var cache = CreateCache();
+        var handler = CreateQueryHandler(context, cache);
 
-        var result = await handler.SearchAsync(null, sortBy: "unsupported", sortOrder: "asc", cancellationToken: cancellationToken);
+        var result = await handler.Handle(new SearchCustomersQuery(null, SortBy: "unsupported", SortOrder: "asc"), cancellationToken);
 
         Assert.Equal(new[] { "Alpha", "Beta", "Gamma" }, result.Items.Select(x => x.Name));
     }
+
+    private static CustomerCommandHandler CreateCommandHandler(AppDbContext context)
+    {
+        var repository = new CustomerRepository(context);
+        var unitOfWork = new UnitOfWork(context);
+        return new CustomerCommandHandler(repository, unitOfWork, Mapper);
+    }
+
+    private static CustomerQueryHandler CreateQueryHandler(AppDbContext context, IMemoryCache cache)
+    {
+        var repository = new CustomerRepository(context);
+        return new CustomerQueryHandler(repository, Mapper, cache);
+    }
+
+    private static MemoryCache CreateCache() => new(new MemoryCacheOptions());
 
     private static async Task SeedCustomersAsync(AppDbContext context, CancellationToken cancellationToken)
     {

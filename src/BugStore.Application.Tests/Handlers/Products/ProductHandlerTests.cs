@@ -161,7 +161,7 @@ public sealed class ProductHandlerTests
 
         var result = await handler.DeleteAsync(Guid.NewGuid(), cancellationToken);
 
-        Assert.Equal(DeleteProductResult.NotFound, result);
+        Assert.False(result);
     }
 
     [Fact]
@@ -183,12 +183,12 @@ public sealed class ProductHandlerTests
 
         var result = await handler.DeleteAsync(product.Id, cancellationToken);
 
-        Assert.Equal(DeleteProductResult.Deleted, result);
+        Assert.True(result);
         Assert.Empty(context.Products);
     }
 
     [Fact]
-    public async Task DeleteAsync_ShouldReturnInUse_WhenProductHasOrderLines()
+    public async Task DeleteAsync_ShouldRemoveRelatedOrderLines()
     {
         await using var context = InMemoryContextFactory.CreateContext();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -238,9 +238,9 @@ public sealed class ProductHandlerTests
 
         var result = await handler.DeleteAsync(product.Id, cancellationToken);
 
-        Assert.Equal(DeleteProductResult.InUse, result);
-        Assert.Equal(1, await context.Products.CountAsync(cancellationToken));
-        Assert.Equal(1, await context.OrderLines.CountAsync(cancellationToken));
+        Assert.True(result);
+        Assert.Equal(0, await context.Products.CountAsync(cancellationToken));
+        Assert.Equal(0, await context.OrderLines.CountAsync(cancellationToken));
     }
 
     [Fact]
