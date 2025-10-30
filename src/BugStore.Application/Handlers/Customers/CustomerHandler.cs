@@ -1,4 +1,6 @@
 using System;
+using AutoMapper;
+using AutoMapper.QueryableExtensions;
 using BugStore.Domain.Entities;
 using BugStore.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -39,10 +41,12 @@ public class CustomerHandler :
     private const int MaxPageSize = 100;
 
     private readonly AppDbContext _context;
+    private readonly IMapper _mapper;
 
-    public CustomerHandler(AppDbContext context)
+    public CustomerHandler(AppDbContext context, IMapper mapper)
     {
         _context = context;
+        _mapper = mapper;
     }
 
     public Task<PagedResult<GetCustomersResponse>> Handle(SearchCustomersQuery request, CancellationToken cancellationToken) =>
@@ -65,12 +69,7 @@ public class CustomerHandler :
         return await _context.Customers
             .AsNoTracking()
             .OrderBy(customer => customer.Name)
-            .Select(customer => new GetCustomersResponse(
-                customer.Id,
-                customer.Name,
-                customer.Email,
-                customer.Phone,
-                customer.BirthDate))
+            .ProjectTo<GetCustomersResponse>(_mapper.ConfigurationProvider)
             .ToListAsync(cancellationToken);
     }
 
@@ -104,12 +103,7 @@ public class CustomerHandler :
         var customers = await query
             .Skip((normalizedPage - 1) * normalizedPageSize)
             .Take(normalizedPageSize)
-            .Select(customer => new GetCustomersResponse(
-                customer.Id,
-                customer.Name,
-                customer.Email,
-                customer.Phone,
-                customer.BirthDate))
+            .ProjectTo<GetCustomersResponse>(_mapper.ConfigurationProvider)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<GetCustomersResponse>(customers, total, normalizedPage, normalizedPageSize);
@@ -121,36 +115,18 @@ public class CustomerHandler :
             .AsNoTracking()
             .FirstOrDefaultAsync(customer => customer.Id == id, cancellationToken);
 
-        return customer is null
-            ? null
-            : new GetCustomerByIdResponse(
-                customer.Id,
-                customer.Name,
-                customer.Email,
-                customer.Phone,
-                customer.BirthDate);
+        return _mapper.Map<GetCustomerByIdResponse?>(customer);
     }
 
     public async Task<CreateCustomerResponse> CreateAsync(CreateCustomerRequest request, CancellationToken cancellationToken = default)
     {
-        var customer = new Customer
-        {
-            Id = Guid.NewGuid(),
-            Name = request.Name,
-            Email = request.Email,
-            Phone = request.Phone,
-            BirthDate = request.BirthDate
-        };
+        var customer = _mapper.Map<Customer>(request);
+        customer.Id = Guid.NewGuid();
 
         _context.Customers.Add(customer);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return new CreateCustomerResponse(
-            customer.Id,
-            customer.Name,
-            customer.Email,
-            customer.Phone,
-            customer.BirthDate);
+        return _mapper.Map<CreateCustomerResponse>(customer);
     }
 
     public async Task<UpdateCustomerResponse?> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken cancellationToken = default)
@@ -159,19 +135,11 @@ public class CustomerHandler :
         if (customer is null)
             return null;
 
-        customer.Name = request.Name;
-        customer.Email = request.Email;
-        customer.Phone = request.Phone;
-        customer.BirthDate = request.BirthDate;
+        _mapper.Map(request, customer);
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        return new UpdateCustomerResponse(
-            customer.Id,
-            customer.Name,
-            customer.Email,
-            customer.Phone,
-            customer.BirthDate);
+        return _mapper.Map<UpdateCustomerResponse>(customer);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
