@@ -5,29 +5,32 @@ using BugStore.Application.Responses.Common;
 using BugStore.Domain.Entities;
 using BugStore.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using MediatR;
 
 namespace BugStore.Application.Handlers.Customers.Queries;
 
-public class CustomerQueryHandler :
+public class CustomerQueryHandler(ICustomerRepository customerRepository, IMapper mapper, IMemoryCache cache) :
     IRequestHandler<SearchCustomersQuery, PagedResult<CustomerListItem>>,
     IRequestHandler<GetCustomerByIdQuery, CustomerDetails?>
 {
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
 
-    private readonly ICustomerRepository _customerRepository;
-    private readonly IMapper _mapper;
-
-    public CustomerQueryHandler(ICustomerRepository customerRepository, IMapper mapper)
-    {
-        _customerRepository = customerRepository;
-        _mapper = mapper;
-    }
+    private readonly ICustomerRepository _customerRepository = customerRepository;
+    private readonly IMapper _mapper = mapper;
+    private readonly IMemoryCache _cache = cache;
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(1);
 
     public async Task<PagedResult<CustomerListItem>> Handle(SearchCustomersQuery request, CancellationToken cancellationToken)
     {
         var (page, pageSize) = NormalizePagination(request.Page, request.PageSize);
+
+        var cacheKey = BuildSearchCacheKey(request.Term, page, pageSize, request.SortBy, request.SortOrder);
+        if (_cache.TryGetValue(cacheKey, out PagedResult<CustomerListItem>? cachedResult) && cachedResult is not null)
+        {
+            return cachedResult;
+        }
 
         var query = _customerRepository
             .Query()
@@ -53,17 +56,32 @@ public class CustomerQueryHandler :
             .ProjectTo<CustomerListItem>(_mapper.ConfigurationProvider)
             .ToListAsync(cancellationToken);
 
-        return new PagedResult<CustomerListItem>(customers, total, page, pageSize);
+        var result = new PagedResult<CustomerListItem>(customers, total, page, pageSize);
+        _cache.Set(cacheKey, result, CacheDuration);
+
+        return result;
     }
 
     public async Task<CustomerDetails?> Handle(GetCustomerByIdQuery request, CancellationToken cancellationToken)
     {
+        var cacheKey = BuildByIdCacheKey(request.Id);
+        if (_cache.TryGetValue(cacheKey, out CustomerDetails? cached) && cached is not null)
+        {
+            return cached;
+        }
+
         var customer = await _customerRepository
             .Query()
             .AsNoTracking()
             .FirstOrDefaultAsync(entity => entity.Id == request.Id, cancellationToken);
 
-        return _mapper.Map<CustomerDetails?>(customer);
+        var details = _mapper.Map<CustomerDetails?>(customer);
+        if (details is not null)
+        {
+            _cache.Set(cacheKey, details, CacheDuration);
+        }
+
+        return details;
     }
 
     private static string EscapeLikePattern(string value) =>
@@ -96,4 +114,9 @@ public class CustomerQueryHandler :
             _ => query.OrderBy(customer => customer.Name)
         };
     }
+
+    private static string BuildSearchCacheKey(string? term, int page, int pageSize, string? sortBy, string? sortOrder) =>
+        $"customers:search:{term}:{page}:{pageSize}:{sortBy}:{sortOrder}";
+
+    private static string BuildByIdCacheKey(Guid id) => $"customers:details:{id}";
 }

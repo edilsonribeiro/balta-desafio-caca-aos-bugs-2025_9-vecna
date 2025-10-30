@@ -16,6 +16,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 builder.Services.AddAutoMapper(typeof(CustomerProfile).Assembly);
+builder.Services.AddMemoryCache();
 builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CustomerQueryHandler>());
 builder.Services.AddScoped<ICustomerAppService, CustomerAppService>();
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
